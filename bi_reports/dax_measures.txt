@@ -1,0 +1,277 @@
+================================================================================
+RAILWAY DATA WAREHOUSE — POWER BI DAX MEASURES LIBRARY
+================================================================================
+Research Project:
+    "Railway Passenger Congestion and Transit Delay Dynamics"
+    Multidimensional OLAP Star Schema & IEEE Paper Submission
+
+Star Schema Tables:
+    - Fact Table:      Fact_TrainDelay
+    - Dimension Tables: Dim_Date, Dim_Train, Dim_Station, Dim_DelayCategory
+================================================================================
+
+ORGANIZATION RECOMMENDATION IN POWER BI:
+In Power BI Desktop:
+1. Go to "Modeling" -> "New Table".
+2. Create a dedicated measures home table:
+   _Measures = { BLANK() }
+3. Add each of the DAX formulas below into this table.
+
+
+--------------------------------------------------------------------------------
+1. BASE VOLUME & AGGREGATION MEASURES
+--------------------------------------------------------------------------------
+
+-- Total transit arrivals recorded across all stations
+Total Arrivals = 
+COUNTROWS(Fact_TrainDelay)
+
+-- Total distinct trains monitored in the network
+Total Distinct Trains = 
+DISTINCTCOUNT(Fact_TrainDelay[TrainSK])
+
+-- Total distinct stations monitored
+Total Distinct Stations = 
+DISTINCTCOUNT(Fact_TrainDelay[StationSK])
+
+-- Cumulative delay in minutes across the entire railway network
+Total Delay Minutes = 
+SUM(Fact_TrainDelay[DelayMinutes])
+
+-- Cumulative delay in hours (useful for executive KPI cards)
+Total Delay Hours = 
+DIVIDE([Total Delay Minutes], 60, 0)
+
+-- Count of arrivals that experienced delay (> 0 minutes)
+Delayed Arrivals Count = 
+CALCULATE(
+    COUNTROWS(Fact_TrainDelay),
+    Fact_TrainDelay[IsDelayed] = 1
+)
+
+-- Count of arrivals that were strictly on-time or arrived early (<= 0 minutes)
+On-Time Arrivals Count = 
+CALCULATE(
+    COUNTROWS(Fact_TrainDelay),
+    Fact_TrainDelay[IsDelayed] = 0
+)
+
+
+--------------------------------------------------------------------------------
+2. PUNCTUALITY & OPERATIONAL RELIABILITY KPIS
+--------------------------------------------------------------------------------
+
+-- On-Time Performance (OTP) % / Punctuality Rate
+-- Format: Percentage (0.0%)
+On-Time Performance Rate = 
+DIVIDE(
+    [On-Time Arrivals Count],
+    [Total Arrivals],
+    0
+)
+
+-- Delay Rate (% of all arrivals that arrived behind schedule)
+-- Format: Percentage (0.0%)
+Delay Rate = 
+DIVIDE(
+    [Delayed Arrivals Count],
+    [Total Arrivals],
+    0
+)
+
+-- Overall Average Delay per arrival across all runs (including 0 min for on-time)
+-- Format: Decimal (0.00 min)
+Average Delay Overall = 
+AVERAGE(Fact_TrainDelay[DelayMinutes])
+
+-- Average Delay strictly for trains that were actually delayed
+-- Format: Decimal (0.00 min)
+Average Delay When Delayed = 
+CALCULATE(
+    AVERAGE(Fact_TrainDelay[DelayMinutes]),
+    Fact_TrainDelay[IsDelayed] = 1
+)
+
+-- Median delay in minutes (mitigates outlier distortion)
+Median Delay Minutes = 
+MEDIAN(Fact_TrainDelay[DelayMinutes])
+
+-- Maximum observed delay in minutes
+Max Delay Minutes = 
+MAX(Fact_TrainDelay[DelayMinutes])
+
+
+--------------------------------------------------------------------------------
+3. DELAY SEVERITY & BANDED CATEGORY DISTRIBUTION (IEEE PAPER METRICS)
+--------------------------------------------------------------------------------
+
+-- Minor Delay count (1 - 15 minutes)
+Minor Delay Count = 
+CALCULATE(
+    COUNTROWS(Fact_TrainDelay),
+    Dim_DelayCategory[DelayCatSK] = 2
+)
+
+-- Moderate Delay count (16 - 45 minutes)
+Moderate Delay Count = 
+CALCULATE(
+    COUNTROWS(Fact_TrainDelay),
+    Dim_DelayCategory[DelayCatSK] = 3
+)
+
+-- Severe Delay count (> 45 minutes)
+Severe Delay Count = 
+CALCULATE(
+    COUNTROWS(Fact_TrainDelay),
+    Dim_DelayCategory[DelayCatSK] = 4
+)
+
+-- Percentage of all transit arrivals suffering from Severe Delays
+-- Format: Percentage (0.00%)
+Severe Delay Percentage = 
+DIVIDE(
+    [Severe Delay Count],
+    [Total Arrivals],
+    0
+)
+
+-- Weighted Delay Severity Index (DSI)
+-- Weights: Minor = 1x, Moderate = 3x, Severe = 5x
+-- Normalized by total arrivals to quantify network disruption
+Delay Severity Index = 
+DIVIDE(
+    ([Minor Delay Count] * 1) + 
+    ([Moderate Delay Count] * 3) + 
+    ([Severe Delay Count] * 5),
+    [Total Arrivals],
+    0
+)
+
+
+--------------------------------------------------------------------------------
+4. CONGESTION & TEMPORAL DYNAMICS (WEEKEND VS. WEEKDAY)
+--------------------------------------------------------------------------------
+
+-- Average delay during Weekdays (Monday - Friday)
+Weekday Average Delay = 
+CALCULATE(
+    AVERAGE(Fact_TrainDelay[DelayMinutes]),
+    Dim_Date[IsWeekend] = 0
+)
+
+-- Average delay during Weekends (Saturday - Sunday)
+Weekend Average Delay = 
+CALCULATE(
+    AVERAGE(Fact_TrainDelay[DelayMinutes]),
+    Dim_Date[IsWeekend] = 1
+)
+
+-- Ratio of Weekend vs. Weekday delay impact
+-- > 1.0 indicates weekend maintenance/congestion pressure
+Weekend to Weekday Delay Ratio = 
+DIVIDE(
+    [Weekend Average Delay],
+    [Weekday Average Delay],
+    1.0
+)
+
+-- Station Congestion Index (SCI)
+-- Quantifies traffic bottlenecks by multiplying arrival density by average delay
+Station Congestion Index = 
+VAR StationArrivals = [Total Arrivals]
+VAR AvgDelay = [Average Delay Overall]
+RETURN
+DIVIDE(StationArrivals * AvgDelay, 1000, 0)
+
+
+--------------------------------------------------------------------------------
+5. TIME INTELLIGENCE & ROLLING TRENDS
+--------------------------------------------------------------------------------
+
+-- Month-To-Date (MTD) cumulative delay minutes
+Delay Minutes MTD = 
+TOTALMTD(
+    [Total Delay Minutes],
+    Dim_Date[FullDate]
+)
+
+-- Prior Month Delay Minutes
+Prior Month Delay Minutes = 
+CALCULATE(
+    [Total Delay Minutes],
+    PREVIOUSMONTH(Dim_Date[FullDate])
+)
+
+-- Month-over-Month (MoM) Delay Growth %
+-- Format: Percentage (+0.0%;-0.0%;0.0%)
+MoM Delay Growth % = 
+VAR CurrentMonth = [Total Delay Minutes]
+VAR PrevMonth = [Prior Month Delay Minutes]
+RETURN
+IF(
+    ISBLANK(PrevMonth),
+    BLANK(),
+    DIVIDE(CurrentMonth - PrevMonth, PrevMonth, 0)
+)
+
+-- 7-Day Moving Average Delay (smoothing daily fluctuations)
+Moving 7Day Avg Delay = 
+AVERAGEX(
+    DATESINPERIOD(
+        Dim_Date[FullDate],
+        LASTDATE(Dim_Date[FullDate]),
+        -7,
+        DAY
+    ),
+    [Average Delay Overall]
+)
+
+
+--------------------------------------------------------------------------------
+6. RANKING & DASHBOARD VISUAL HELPERS
+--------------------------------------------------------------------------------
+
+-- Rank Stations by total delay minutes generated (Identifies Top Bottlenecks)
+Station Delay Rank = 
+IF(
+    ISINSCOPE(Dim_Station[StationName]),
+    RANKX(
+        ALLSELECTED(Dim_Station[StationName]),
+        [Total Delay Minutes],
+        ,
+        DESC,
+        Dense
+    ),
+    BLANK()
+)
+
+-- Rank Trains by average delay (Identifies Chronic Offending Routes)
+Train Delay Rank = 
+IF(
+    ISINSCOPE(Dim_Train[TrainNumber]),
+    RANKX(
+        ALLSELECTED(Dim_Train[TrainNumber]),
+        [Average Delay Overall],
+        ,
+        DESC,
+        Dense
+    ),
+    BLANK()
+)
+
+-- Dynamic KPI Card Status Label with Unicode Status Bullets
+Punctuality Status Indicator = 
+SWITCH(
+    TRUE(),
+    [On-Time Performance Rate] >= 0.85, "🟢 Optimal Reliability (≥ 85%)",
+    [On-Time Performance Rate] >= 0.70, "🟡 Moderate Congestion (70% - 84%)",
+    "🔴 Severe Network Disruption (< 70%)"
+)
+
+-- Dynamic Alert for Station Bottlenecks
+Station Bottleneck Alert = 
+IF(
+    [Severe Delay Percentage] > 0.10,
+    "⚠️ Critical Bottleneck (>10% Severe Delays)",
+    "✅ Stable Flow"
+)

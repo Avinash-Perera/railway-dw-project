@@ -1,0 +1,10 @@
+# Railway Data Warehouse & Analytics Platform
+# Dependencies for ETL Pipeline, Database Connector, and Analytics
+# Python 3.9+
+
+pandas>=2.0.0
+numpy>=1.24.0
+SQLAlchemy>=2.0.0
+PyMySQL>=1.1.0
+cryptography>=41.0.0
+python-dotenv>=1.0.0
