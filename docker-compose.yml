@@ -28,6 +28,24 @@ services:
       start_period: 15s
 
   # ---------------------------------------------------------------------------
+  # Metabase Open-Source Business Intelligence & Analytics Dashboard
+  # Access in browser at: http://localhost:3000
+  # ---------------------------------------------------------------------------
+  metabase:
+    image: metabase/metabase:latest
+    container_name: railway_bi_metabase
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - metabase_data:/metabase-data
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
   # Optional: Containerized ETL Runner (run via: docker compose run --rm etl)
   # ---------------------------------------------------------------------------
   etl:
@@ -52,4 +70,6 @@ services:
 
 volumes:
   mysql_dw_data:
+    driver: local
+  metabase_data:
     driver: local
