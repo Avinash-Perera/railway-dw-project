@@ -16,3 +16,10 @@ venv/
 .DS_Store
 .vscode/
 .idea/
+
+# tex and md files
+./paper/IEEE_Railway_DW_Paper.md
+./paper/IEEE_Railway_DW_Paper_for_Submission.md
+./paper/IEEE_Railway_DW_Paper.docx
+./paper/IEEE_Railway_DW_Paper.pdf
+./paper/IEEE_Railway_DW.tex
