@@ -37,10 +37,14 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    volumes:
-      - metabase_data:/metabase-data
     environment:
-      MB_DB_FILE: /metabase-data/metabase.db
+      # Store Metabase app data in MySQL — same persistent volume as the DW
+      MB_DB_TYPE: mysql
+      MB_DB_HOST: mysql
+      MB_DB_PORT: 3306
+      MB_DB_DBNAME: metabase_db
+      MB_DB_USER: root
+      MB_DB_PASS: dw_password
     depends_on:
       mysql:
         condition: service_healthy
@@ -70,6 +74,4 @@ services:
 
 volumes:
   mysql_dw_data:
-    driver: local
-  metabase_data:
     driver: local
