@@ -16,6 +16,7 @@ def get_engine():
     # Connection string format for PyMySQL
     connection_string = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
     
-    # Create the engine
-    engine = create_engine(connection_string, pool_pre_ping=True)
+    # Create the engine (local_infile enables the fast LOAD DATA LOCAL INFILE bulk path)
+    engine = create_engine(connection_string, pool_pre_ping=True,
+                           connect_args={'local_infile': True})
     return engine

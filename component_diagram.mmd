@@ -1,0 +1,93 @@
+flowchart TD
+    %% ==========================================
+    %% 1. RAW DATA STORE COMPONENT
+    %% ==========================================
+    subgraph COMP_DATA["«component» Raw Data Source (Host Storage)"]
+        direction TB
+        F1["combined_delay.csv (38.5M rows / 1.02 GB)"]
+        F2["station_full_names.csv (8,963 stations)"]
+        F3["train_details.csv (8,720 trains)"]
+        F4["combined_schedule.csv (280K entries)"]
+    end
+
+    %% ==========================================
+    %% 2. PYTHON ETL INGESTION COMPONENT
+    %% ==========================================
+    subgraph COMP_ETL["«component» Python ETL Engine (etl/)"]
+        direction TB
+        ETL_CTRL["run_etl.py (Pipeline Controller)"]
+        ETL_DIM["load_dimensions.py (Phase 1: Dimension Loader)"]
+        ETL_FACT["load_fact.py (Phase 2: 50K Chunk Fact Loader)"]
+        ETL_CONN["db_connector.py (SQLAlchemy Connection Pool)"]
+        
+        ETL_CTRL --> ETL_DIM
+        ETL_CTRL --> ETL_FACT
+        ETL_DIM --> ETL_CONN
+        ETL_FACT --> ETL_CONN
+    end
+
+    COMP_DATA -->|"Read CSV Streams (chunksize=50,000)"| COMP_ETL
+
+    %% ==========================================
+    %% 3. DOCKER EXECUTION RUNTIME
+    %% ==========================================
+    subgraph DOCKER_RUNTIME["«execution environment» Docker Compose Runtime"]
+        direction TB
+
+        %% MySQL Component
+        subgraph COMP_MYSQL["«component» OLAP Data Warehouse (railway_dw_mysql)"]
+            direction TB
+            PORT_3306["«interface» Port 3306 (TCP)"]
+            
+            subgraph SQL_BOOT["SQL Bootstrap Scripts"]
+                INIT1["01_create_database.sql"]
+                INIT2["02_create_star_schema.sql"]
+                INIT3["03_indexes_and_views.sql"]
+            end
+            
+            subgraph STAR_SCHEMA["Kimball Star Schema (railway_dw)"]
+                TBL_FACT[("Fact_TrainDelay (38,322,228 records)")]
+                TBL_DIMS[("4 Conformed Dimensions (Date, Station, Train, Cat)")]
+                TBL_INDEX["Composite B-Tree Indexes (idx_fact_date_station, idx_fact_delayed)"]
+                TBL_VIEW["Analytical View (vw_RailwayAnalytics)"]
+            end
+            
+            VOL_DATA[("«volume» mysql_dw_data (/var/lib/mysql)")]
+            
+            PORT_3306 --> STAR_SCHEMA
+            STAR_SCHEMA --- VOL_DATA
+        end
+
+        %% Metabase Component
+        subgraph COMP_META["«component» BI Analytics Engine (railway_bi_metabase)"]
+            direction TB
+            PORT_3000["«interface» Port 3000 (HTTP)"]
+            META_APP[("Internal App DB: metabase_db")]
+            META_CACHE["Adaptive Query Caching Engine"]
+            META_CORE["Metabase Query Runner (Native SQL)"]
+            
+            PORT_3000 --> META_CORE
+            META_CORE --- META_APP
+            META_CORE --- META_CACHE
+        end
+
+        %% Internal Docker Network
+        COMP_META -->|"Internal Docker Bridge Network (MB_DB_HOST: mysql:3306)"| PORT_3306
+    end
+
+    ETL_CONN -->|"MySQL Protocol / Port 3306 (root:dw_password)"| PORT_3306
+
+    %% ==========================================
+    %% 4. CLIENT & PRESENTATION LAYER
+    %% ==========================================
+    subgraph COMP_CLIENT["«component» Client & Presentation Layer"]
+        direction TB
+        BROWSER["Web Browser UI (http://localhost:3000)"]
+        DASHBOARD["Metabase Dashboard (7 Visual Cards: D / D / P / Pr)"]
+        PAPER_GEN["generate_paper_figures.py (Publication Charts)"]
+        
+        BROWSER --> DASHBOARD
+    end
+
+    PORT_3000 -->|"HTTP REST API / JSON"| BROWSER
+    STAR_SCHEMA -->|"Direct SQL Extraction"| PAPER_GEN
