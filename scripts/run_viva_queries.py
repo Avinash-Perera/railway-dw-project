@@ -82,24 +82,23 @@ def main():
             # 3. Date Dimension Enrichment
             sql_date = """
             SELECT 
-                DateSK, FullDate, DayOfWeekName, IsWeekend, 
-                IsIndianHoliday, HolidayName, SeasonName, FiscalQuarter
+                DateSK, FullDate, DayOfWeek, IsWeekend, 
+                IsHoliday, HolidayName, Season, QuarterName
             FROM Dim_Date
             WHERE FullDate IN ('2025-01-26', '2025-08-15', '2025-10-02', '2025-02-15', '2025-03-08')
             ORDER BY DateSK;
             """
-            run_query(conn, out_fh, "3. Date Dimension Enrichment (Holidays, Seasons, Weekends, Fiscal Quarters)", sql_date)
+            run_query(conn, out_fh, "3. Date Dimension Enrichment (Holidays, Seasons, Weekends, Quarters)", sql_date)
 
             # 4. Station Dimension (Natural Hierarchy & Cleaned Attributes)
             sql_station = """
             SELECT 
-                StationSK, StationCode, StationName, ZoneCode, 
-                StationCategory, StateName, Latitude, Longitude
+                StationSK, StationCode, StationName, ZoneCode, ZoneName
             FROM Dim_Station
             WHERE StationCode IN ('NDLS', 'CSMT', 'HWH', 'MAS', 'SBC')
             ORDER BY StationSK;
             """
-            run_query(conn, out_fh, "4. Dim_Station: Natural Hierarchy (ZoneCode -> Category -> Station; Operational Bloat Stripped)", sql_station)
+            run_query(conn, out_fh, "4. Dim_Station: Natural Hierarchy (ZoneName -> StationName; Operational Bloat Stripped)", sql_station)
 
             # 5. Derived Measures in Fact_TrainDelay
             sql_derived = """

@@ -1,32 +1,39 @@
 flowchart TD
     %% ==========================================
-    %% 1. RAW DATA STORE COMPONENT
+    %% 1. RAW DATA SOURCE COMPONENT
     %% ==========================================
-    subgraph COMP_DATA["«component» Raw Data Source (Host Storage)"]
+    subgraph COMP_DATA["«component» Raw Data Sources (5 Operational Feeds)"]
         direction TB
-        F1["combined_delay.csv (38.5M rows / 1.02 GB)"]
-        F2["station_full_names.csv (8,963 stations)"]
-        F3["train_details.csv (8,720 trains)"]
-        F4["combined_schedule.csv (280K entries)"]
+        F1["combined_delay.csv (38.4M rows — Station Arrival Telemetry)"]
+        F2["combined_schedule.csv (172K rows — Master Timetable)"]
+        F3["train_details.csv (8,992 rows — Train Master)"]
+        F4["station_full_names.csv (8,963 rows — Station Master)"]
+        F5["train_delays.csv (Journey Cancellations, Delay Causes & Weather)"]
     end
 
     %% ==========================================
     %% 2. PYTHON ETL INGESTION COMPONENT
     %% ==========================================
-    subgraph COMP_ETL["«component» Python ETL Engine (etl/)"]
+    subgraph COMP_ETL["«component» Python ETL & Validation Engine (etl/)"]
         direction TB
-        ETL_CTRL["run_etl.py (Pipeline Controller)"]
-        ETL_DIM["load_dimensions.py (Phase 1: Dimension Loader)"]
-        ETL_FACT["load_fact.py (Phase 2: 50K Chunk Fact Loader)"]
-        ETL_CONN["db_connector.py (SQLAlchemy Connection Pool)"]
+        ETL_CTRL["run_etl.py (Master Pipeline Orchestrator)"]
+        ETL_DIM["load_dimensions.py (Phase 1: 8 Conformed Dimensions + SCD2 + Holiday/Time Generation)"]
+        ETL_FACT["load_fact.py (Phase 2: 250K-Chunk Loader for Events 1–4 + Derived Measures)"]
+        ETL_EVENT["load_event_facts.py (Phase 3: Events 5–7 Loader + Event 8 Daily Snapshot Rollup)"]
+        ETL_VAL["validate_load.py (Phase 4: 68 Automated Reconciliation, SCD2 & RI Checks)"]
+        ETL_CONN["db_connector.py (SQLAlchemy Connection Pool + LOAD DATA LOCAL INFILE)"]
         
         ETL_CTRL --> ETL_DIM
         ETL_CTRL --> ETL_FACT
+        ETL_CTRL --> ETL_EVENT
+        ETL_CTRL --> ETL_VAL
         ETL_DIM --> ETL_CONN
         ETL_FACT --> ETL_CONN
+        ETL_EVENT --> ETL_CONN
+        ETL_VAL --> ETL_CONN
     end
 
-    COMP_DATA -->|"Read CSV Streams (chunksize=50,000)"| COMP_ETL
+    COMP_DATA -->|"Streaming CSV Ingestion + Data Quality Filtering"| COMP_ETL
 
     %% ==========================================
     %% 3. DOCKER EXECUTION RUNTIME
@@ -35,21 +42,21 @@ flowchart TD
         direction TB
 
         %% MySQL Component
-        subgraph COMP_MYSQL["«component» OLAP Data Warehouse (railway_dw_mysql)"]
+        subgraph COMP_MYSQL["«component» OLAP Data Warehouse (railway_dw_mysql :3306)"]
             direction TB
             PORT_3306["«interface» Port 3306 (TCP)"]
             
-            subgraph SQL_BOOT["SQL Bootstrap Scripts"]
+            subgraph SQL_BOOT["SQL Bootstrap Scripts (sql/)"]
                 INIT1["01_create_database.sql"]
-                INIT2["02_create_star_schema.sql"]
-                INIT3["03_indexes_and_views.sql"]
+                INIT2["02_create_star_schema.sql (8 Facts + 8 Dims)"]
+                INIT3["03_indexes_and_views.sql (OLAP & KPI Views)"]
             end
             
-            subgraph STAR_SCHEMA["Kimball Star Schema (railway_dw)"]
-                TBL_FACT[("Fact_TrainDelay (38,322,228 records)")]
-                TBL_DIMS[("4 Conformed Dimensions (Date, Station, Train, Cat)")]
-                TBL_INDEX["Composite B-Tree Indexes (idx_fact_date_station, idx_fact_delayed)"]
-                TBL_VIEW["Analytical View (vw_RailwayAnalytics)"]
+            subgraph STAR_SCHEMA["Fact Constellation / Star Schema (railway_dw)"]
+                TBL_DIMS[("8 Conformed Dimensions\n(Dim_Date, Dim_Time, Dim_Station, Dim_Train [SCD2],\nDim_DelayCategory, Dim_Weather, Dim_DelayReason, Dim_CancellationReason)")]
+                TBL_FACT[("8 Business Event Fact Tables\n(Fact_TrainDelay, Fact_TrainSchedule, Fact_JourneyDeparture,\nFact_JourneyArrival, Fact_JourneyCancellation, Fact_DelayIncident,\nFact_WeatherObservation, Fact_TrainDailySnapshot)")]
+                TBL_INDEX["Composite B-Tree Indexes\n(idx_fact_date_station, idx_fact_train_cat, idx_fact_time, idx_sched_train)"]
+                TBL_VIEW["Analytical & KPI Views\n(vw_RailwayAnalytics, vw_KPI_Monthly,\nvw_KPI_WeekendUplift, vw_KPI_PeakSurge)"]
             end
             
             VOL_DATA[("«volume» mysql_dw_data (/var/lib/mysql)")]
@@ -59,7 +66,7 @@ flowchart TD
         end
 
         %% Metabase Component
-        subgraph COMP_META["«component» BI Analytics Engine (railway_bi_metabase)"]
+        subgraph COMP_META["«component» BI Analytics Engine (railway_bi_metabase :3000)"]
             direction TB
             PORT_3000["«interface» Port 3000 (HTTP)"]
             META_APP[("Internal App DB: metabase_db")]
@@ -72,22 +79,22 @@ flowchart TD
         end
 
         %% Internal Docker Network
-        COMP_META -->|"Internal Docker Bridge Network (MB_DB_HOST: mysql:3306)"| PORT_3306
+        COMP_META -->|"Internal Docker Bridge Network (mysql:3306)"| PORT_3306
     end
 
-    ETL_CONN -->|"MySQL Protocol / Port 3306 (root:dw_password)"| PORT_3306
+    ETL_CONN -->|"MySQL Protocol / Port 3306 (Bulk TSV Load)"| PORT_3306
 
     %% ==========================================
     %% 4. CLIENT & PRESENTATION LAYER
     %% ==========================================
-    subgraph COMP_CLIENT["«component» Client & Presentation Layer"]
+    subgraph COMP_CLIENT["«component» Client, Reporting & Presentation Layer"]
         direction TB
         BROWSER["Web Browser UI (http://localhost:3000)"]
-        DASHBOARD["Metabase Dashboard (7 Visual Cards: D / D / P / Pr)"]
-        PAPER_GEN["generate_paper_figures.py (Publication Charts)"]
+        DASHBOARD["Executive BI Dashboard (5 KPIs: Value, Goal, Status [G/A/R], Trend [MoM])"]
+        DOC_GEN["generate_submission_docx.py & generate_model_diagrams.py\n(Bus Matrix, Star Schema, Traceability Report)"]
         
         BROWSER --> DASHBOARD
     end
 
     PORT_3000 -->|"HTTP REST API / JSON"| BROWSER
-    STAR_SCHEMA -->|"Direct SQL Extraction"| PAPER_GEN
+    STAR_SCHEMA -->|"Direct SQL Extraction"| DOC_GEN

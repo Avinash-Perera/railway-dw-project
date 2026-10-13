@@ -93,12 +93,12 @@ ORDER BY TrainNumber, TrainSK;
 
 ---
 
-### 3. Date Dimension Enrichment (Holidays, Seasons, Weekends, Fiscal Quarters)
+### 3. Date Dimension Enrichment (Holidays, Seasons, Weekends, Quarters)
 
 ```sql
 SELECT 
-    DateSK, FullDate, DayOfWeekName, IsWeekend, 
-    IsIndianHoliday, HolidayName, SeasonName, FiscalQuarter
+    DateSK, FullDate, DayOfWeek, IsWeekend, 
+    IsHoliday, HolidayName, Season, QuarterName
 FROM Dim_Date
 WHERE FullDate IN ('2025-01-26', '2025-08-15', '2025-10-02', '2025-02-15', '2025-03-08')
 ORDER BY DateSK;
@@ -107,22 +107,21 @@ ORDER BY DateSK;
 **Results (5 rows):**
 
 ```
-  DateSK   FullDate DayOfWeekName  IsWeekend  IsIndianHoliday        HolidayName    SeasonName FiscalQuarter
-20250126 2025-01-26        Sunday          1                1       Republic Day        Winter            Q4
-20250215 2025-02-15      Saturday          1                0               None        Winter            Q4
-20250308 2025-03-08      Saturday          1                0               None        Summer            Q4
-20250815 2025-08-15        Friday          0                1   Independence Day       Monsoon            Q2
-20251002 2025-10-02      Thursday          0                1     Gandhi Jayanti  Post-Monsoon            Q3
+  DateSK   FullDate DayOfWeek  IsWeekend  IsHoliday               HolidayName        Season QuarterName
+20250126 2025-01-26    Sunday          1          1              Republic Day        Winter          Q1
+20250215 2025-02-15  Saturday          1          0               Regular Day        Winter          Q1
+20250308 2025-03-08  Saturday          1          0               Regular Day        Summer          Q1
+20250815 2025-08-15    Friday          0          1          Independence Day       Monsoon          Q3
+20251002 2025-10-02  Thursday          0          1 Gandhi Jayanti / Dussehra  Post-Monsoon          Q4
 ```
 
 ---
 
-### 4. Dim_Station: Natural Hierarchy (ZoneCode -> Category -> Station; Operational Bloat Stripped)
+### 4. Dim_Station: Natural Hierarchy (ZoneName -> StationName; Operational Bloat Stripped)
 
 ```sql
 SELECT 
-    StationSK, StationCode, StationName, ZoneCode, 
-    StationCategory, StateName, Latitude, Longitude
+    StationSK, StationCode, StationName, ZoneCode, ZoneName
 FROM Dim_Station
 WHERE StationCode IN ('NDLS', 'CSMT', 'HWH', 'MAS', 'SBC')
 ORDER BY StationSK;
@@ -131,12 +130,12 @@ ORDER BY StationSK;
 **Results (5 rows):**
 
 ```
- StationSK StationCode             StationName ZoneCode        StationCategory    StateName  Latitude  Longitude
-       412        CSMT     Mumbai CSM Terminus       CR  NSG-1 (Major Terminus)  Maharashtra    18.940     72.835
-      1205         HWH         Howrah Junction       ER  NSG-1 (Major Terminus)  West Bengal    22.583     88.342
-      3180         MAS         Chennai Central       SR  NSG-1 (Major Terminus)   Tamil Nadu    13.082     80.275
-      5014        NDLS               New Delhi       NR  NSG-1 (Major Terminus)        Delhi    28.614     77.209
-      6820         SBC           KSR Bengaluru      SWR  NSG-1 (Major Terminus)    Karnataka    12.978     77.570
+ StationSK StationCode          StationName ZoneCode              ZoneName
+       412        CSMT  Mumbai CSM Terminus       CR       Central Railway
+      1205         HWH      Howrah Junction       ER       Eastern Railway
+      3180         MAS      Chennai Central       SR      Southern Railway
+      5014        NDLS            New Delhi       NR      Northern Railway
+      6820         SBC        KSR Bengaluru      SWR South Western Railway
 ```
 
 ---

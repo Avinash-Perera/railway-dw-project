@@ -20,58 +20,71 @@ The platform converts high-frequency operational transit records (over 1 GB of r
 
 ---
 
-## 2. Multidimensional Star Schema Architecture
+## 2. Multidimensional Star Schema & Fact Constellation Architecture
 
-The data warehouse employs a **Star Schema** centered around `Fact_TrainDelay`, optimized for analytical queries (slicing, dicing, drill-down, and roll-up) without complex recursive joins.
+The data warehouse employs a **Fact Constellation (Multi-Star Schema)** comprising **8 Business Events (Fact Tables)** sharing **8 Conformed Dimensions**, centered around `Fact_TrainDelay` and optimized for OLAP slicing, dicing, drill-down, and roll-up.
 
-```
-                         +-----------------------+
-                         |       Dim_Date        |
-                         +-----------------------+
-                         | PK  DateSK (YYYYMMDD) |
-                         |     FullDate          |
-                         |     Year              |
-                         |     Quarter           |
-                         |     Month, MonthName  |
-                         |     Day, DayOfWeek    |
-                         |     IsWeekend         |
-                         +-----------+-----------+
-                                     |
-                                     | 1:N
-                                     v
-+----------------------+   +-------------------+   +----------------------+
-|     Dim_Station      |   |  Fact_TrainDelay  |   |      Dim_Train       |
-+----------------------+   +-------------------+   +----------------------+
-| PK  StationSK (Surr) |   | PK  FactID        |   | PK  TrainSK (Surr)   |
-|     StationCode      |<--+ FK  StationSK     +-->|     TrainNumber      |
-|     StationName      |1:N| FK  TrainSK       |1:N|     TrainName        |
-+----------------------+   | FK  DateSK        |   |     TrainType        |
-                           | FK  DelayCatSK    |   +----------------------+
-                           |     DelayMinutes  |
-                           |     IsDelayed     |
-                           +---------+---------+
-                                     ^
-                                     | 1:N
-                                     |
-                         +-----------+-----------+
-                         |   Dim_DelayCategory   |
-                         +-----------------------+
-                         | PK  DelayCatSK        |
-                         |     CategoryName      |
-                         |     MinDelayMinutes   |
-                         |     MaxDelayMinutes   |
-                         +-----------------------+
+```text
++-------------------------------+               +-----------------------------------+
+|           Dim_Date            |               |            Dim_Station            |
++-------------------------------+               +-----------------------------------+
+| PK  DateSK (YYYYMMDD)         |               | PK  StationSK (Surrogate)         |
+|     FullDate, Year, Quarter   |               |     StationCode (NK), StationName |
+|     Month, MonthName, Day     |               |     ZoneCode, ZoneName            |
+|     DayOfWeek, IsWeekend      |               +-----------------+-----------------+
+|     IsHoliday, HolidayName    |                                 | 1:N
+|     Season                    |                                 v
++---------------+---------------+               +-----------------+-----------------+
+                | 1:N                           |          Fact_TrainDelay          |
+                +------------------------------>|-----------------------------------|
+                                                | PK  FactID                        |
++-------------------------------+     1:N       | FK  DateSK, TimeSK, StationSK     |
+|           Dim_Time            |-------------->| FK  TrainSK, DelayCatSK           |
++-------------------------------+               | DD  StopSequence                  |
+| PK  TimeSK (HHMM / 9999)      |               |     DelayMinutes, TripCount       |
+|     TimeLabel, Hour24, Minute |               |     IsDelayed, PunctualFlag       |
+|     TimeOfDayBand, IsPeakHour |               |     SevereDelayFlag               |
++-------------------------------+               |     ExcessDelayMinutes            |
+                                                +---+---------------------------+---+
++-------------------------------+     1:N           ^                           ^
+|       Dim_DelayCategory       |-------------------+                           | 1:N
++-------------------------------+               +-------------------------------+---+
+| PK  DelayCatSK (1..4)         |               |          Dim_Train (SCD2)         |
+|     CategoryName              |               +-----------------------------------+
+|     MinDelayMinutes           |               | PK  TrainSK (Surrogate)           |
+|     MaxDelayMinutes           |               |     TrainNumber (NK), TrainName   |
++-------------------------------+               |     TrainTypeCode, TrainTypeName  |
+                                                |     ServiceClass                  |
+                                                |     EffectiveStartDate            |
+                                                |     EffectiveEndDate, IsCurrent   |
+                                                +-----------------------------------+
 ```
 
-### Table Specifications
+### Fact Tables (8 Business Events)
 
-| Table Name | Classification | Grain | Primary / Surrogate Key | Description |
+| # | Table Name | Business Event | Grain (One Row =) | Surrogate PK |
+| :-: | :--- | :--- | :--- | :--- |
+| **1** | **`Fact_TrainDelay`** | Train arrival at a station | One train arriving at one station on one calendar date | `FactID` |
+| **2** | **`Fact_TrainSchedule`** | Scheduled stop of a train | One scheduled stop of one train at one station | `ScheduleFactID` |
+| **3** | **`Fact_JourneyDeparture`** | Journey departure from origin | One journey departing its origin station on one date | `DepartureFactID` |
+| **4** | **`Fact_JourneyArrival`** | Journey arrival at destination | One journey arriving at its destination station on one date | `ArrivalFactID` |
+| **5** | **`Fact_JourneyCancellation`** | Journey cancellation | One cancelled journey on one calendar date | `CancellationFactID` |
+| **6** | **`Fact_DelayIncident`** | Delay incident attributed to a cause | One delayed journey attributed to one primary delay reason | `IncidentFactID` |
+| **7** | **`Fact_WeatherObservation`** | Weather observation during journey | One weather condition recorded for one journey on one date | `WeatherFactID` |
+| **8** | **`Fact_TrainDailySnapshot`** | Daily train performance snapshot | One train on one calendar date (periodic snapshot) | `SnapshotFactID` |
+
+### Conformed Dimension Tables (8 Dimensions)
+
+| Table Name | Classification | Surrogate PK | Natural Key | Natural Hierarchy / Details |
 | :--- | :--- | :--- | :--- | :--- |
-| **`Fact_TrainDelay`** | Central Fact | One scheduled arrival at one station on a specific date | `FactID` (BIGINT AUTO_INCREMENT) | Records continuous delay in minutes, delay status flag, and FKs to all dimensions. |
-| **`Dim_Date`** | Conformed Dimension | One calendar day | `DateSK` (INT: `YYYYMMDD`) | Pre-populated 2024–2026 calendar including weekend flags, quarters, and days of week. |
-| **`Dim_Train`** | Role Dimension | One unique train service | `TrainSK` (INT AUTO_INCREMENT) | Natural key: `TrainNumber`. Attributes: name, type classification. |
-| **`Dim_Station`** | Spatial Dimension | One unique station | `StationSK` (INT AUTO_INCREMENT) | Natural key: `StationCode`. Attributes: formal station name. |
-| **`Dim_DelayCategory`** | Banded Dimension | Delay severity tier | `DelayCatSK` (INT 1–4) | Categorizes delays: `On-Time (≤0m)`, `Minor (1-15m)`, `Moderate (16-45m)`, `Severe (>45m)`. |
+| **`Dim_Date`** | Calendar Dimension | `DateSK` (`YYYYMMDD`) | `FullDate` | `Year > Quarter > Month > Day` + `IsWeekend`, `IsHoliday`, `HolidayName`, `Season` |
+| **`Dim_Time`** | Time-of-Day Dimension | `TimeSK` (`HHMM` / `9999`) | `TimeLabel` | `TimeOfDayBand > Hour24 > Minute` + `IsPeakHour` |
+| **`Dim_Station`** | Spatial Dimension | `StationSK` | `StationCode` | `ZoneName > StationName` *(operational street address stripped)* |
+| **`Dim_Train`** | Service Dimension (**SCD Type 2**) | `TrainSK` | `TrainNumber` | `ServiceClass > TrainTypeName > TrainNumber` + `EffectiveStartDate`, `EffectiveEndDate`, `IsCurrent` |
+| **`Dim_DelayCategory`** | Banded Dimension | `DelayCatSK` (`1–4`) | — | `On-Time / Early (≤0m)`, `Minor (1-15m)`, `Moderate (16-45m)`, `Severe (>45m)` |
+| **`Dim_Weather`** | Environmental Dimension | `WeatherSK` (`1–5`) | — | `WeatherSeverity > WeatherCondition` (`Clear`, `Rain`, `Fog`, `Storm`, `Unknown`) |
+| **`Dim_DelayReason`** | Root-Cause Dimension | `DelayReasonSK` (`1–9`) | — | `DelayReasonGroup > DelayReasonName` (`Infrastructure`, `Traffic`, `Rolling Stock`) |
+| **`Dim_CancellationReason`** | Cancellation Dimension | `CancellationReasonSK` (`1–6`) | — | `CancellationGroup > CancellationReasonName` (`Environmental`, `Rolling Stock`, `Operations`) |
 
 ---
 
